@@ -15,6 +15,11 @@ globally (`goto_error`) or per URL (`goto_errors`).
 from collections.abc import Callable
 from typing import Any
 
+from app.models.lead import Lead
+from app.providers.provider_factory import ProviderFactory
+from app.providers.provider_registry import ProviderRegistry
+from app.providers.search_provider import SearchProvider
+
 
 class FakeElement:
     """A single fake DOM element with attributes and text."""
@@ -211,3 +216,43 @@ class FakeBrowser:
     def close(self) -> None:
         self.close_count += 1
         self._running = False
+
+
+class FixedLeadsProvider(SearchProvider):
+    """A provider that hands the pipeline a fixed set of leads.
+
+    Set ``current_leads`` (a class attribute) to the leads the next run should
+    hand out. It never touches the network and closes without side effects, so
+    full end-to-end runs can be exercised deterministically in tests.
+    """
+
+    name = "fixed"
+    current_leads: list[Lead] = []
+
+    def __init__(self, browser, plan, settings, logger=None) -> None:
+        super().__init__(browser=browser, plan=plan, settings=settings, logger=logger)
+        self._page = browser.new_page()
+        self._leads = list(FixedLeadsProvider.current_leads)
+
+    @property
+    def page(self) -> FakePage:
+        return self._page
+
+    @property
+    def leads(self) -> list[Lead]:
+        return self._leads
+
+    def close(self) -> None:
+        pass
+
+
+def build_fixed_factory(
+    settings: Any,
+    browser: FakeBrowser,
+    leads: list[Lead],
+) -> ProviderFactory:
+    """Build a ProviderFactory serving ``leads`` through the 'fixed' provider."""
+    FixedLeadsProvider.current_leads = list(leads)
+    registry = ProviderRegistry()
+    registry.register(FixedLeadsProvider)
+    return ProviderFactory(registry=registry, settings=settings, browser=browser)

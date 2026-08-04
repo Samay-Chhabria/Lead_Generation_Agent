@@ -21,8 +21,7 @@ from app.pipeline.application_pipeline import ApplicationPipeline
 from app.pipeline.search_pipeline import SearchPipeline
 from app.providers.provider_factory import ProviderFactory
 from app.providers.provider_registry import ProviderRegistry
-from app.providers.search_provider import SearchProvider
-from tests.fakes import FakeBrowser, FakeElement, FakePage
+from tests.fakes import FakeBrowser, FakeElement, FakePage, FixedLeadsProvider
 
 PROMPT = "software companies in Karachi"
 MAILTO_SELECTOR = 'a[href^="mailto:"]'
@@ -40,29 +39,6 @@ def settings(tmp_path: Path) -> Settings:
         log_dir=tmp_path / "logs",
         log_level="INFO",
     )
-
-
-class FixedLeadsProvider(SearchProvider):
-    """A provider that hands the pipeline a fixed set of leads."""
-
-    name = "fixed"
-    current_leads: list[Lead] = []
-
-    def __init__(self, browser, plan, settings, logger=None):
-        super().__init__(browser=browser, plan=plan, settings=settings, logger=logger)
-        self._page = browser.new_page()
-        self._leads = list(FixedLeadsProvider.current_leads)
-
-    @property
-    def page(self):
-        return self._page
-
-    @property
-    def leads(self):
-        return self._leads
-
-    def close(self) -> None:
-        pass
 
 
 def _lead(name: str = "Acme Corp", website: str = "") -> Lead:

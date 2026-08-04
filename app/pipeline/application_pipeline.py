@@ -8,8 +8,8 @@ exports them to an .xlsx workbook, and prints an execution summary
 (Requirement 1, 11, 12).
 
 A failure in one stage never discards data already collected by earlier
-stages: provider or export failures are logged and surfaced through a
-non-successful ExecutionResult instead of being re-raised.
+stages: provider, export, or unexpected failures are logged and surfaced
+through a non-successful ExecutionResult instead of being re-raised.
 """
 
 import logging
@@ -19,9 +19,7 @@ from rich.console import Console
 
 from app.config.logging_config import get_logger
 from app.config.settings import Settings
-from app.exceptions.export_exception import ExportException
 from app.exceptions.parser_exception import ParserException
-from app.exceptions.provider_exception import ProviderException
 from app.models.execution_result import ExecutionResult
 from app.models.search_plan import SearchPlan
 from app.parser.prompt_parser import PromptParser
@@ -89,7 +87,7 @@ class ApplicationPipeline:
         try:
             pipeline = self._build_pipeline()
             provider_result, processing_result, path = pipeline.run_and_export(plan)
-        except (ProviderException, ExportException) as exc:
+        except Exception as exc:
             self._logger.exception("Pipeline failed: %s", exc)
             result = ExecutionResult(
                 search_query=plan.original_prompt,
