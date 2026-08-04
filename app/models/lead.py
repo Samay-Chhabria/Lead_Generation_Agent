@@ -39,6 +39,27 @@ class Lead:
             return self
         return replace(self, email=email)
 
+    def is_valid(self) -> bool:
+        """Return True when the lead carries the required business name.
+
+        This checks only the one required field. Full semantic validation of
+        every present field is performed by ``LeadValidator``; a lead with
+        missing optional data is still considered valid here (Requirement 7).
+        """
+        return bool(self.business_name.strip())
+
+    def has_website(self) -> bool:
+        """Return True when the lead has a website value."""
+        return bool(self.website)
+
+    def has_email(self) -> bool:
+        """Return True when the lead has an email value."""
+        return bool(self.email)
+
+    def has_phone(self) -> bool:
+        """Return True when the lead has a phone number value."""
+        return bool(self.phone_number)
+
     def __post_init__(self) -> None:
         if not isinstance(self.business_name, str):
             raise TypeError("business_name must be a string.")
