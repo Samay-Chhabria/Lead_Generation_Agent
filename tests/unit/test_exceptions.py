@@ -1,4 +1,4 @@
-"""Tests for the exception hierarchy and scaffold contracts."""
+"""Tests for the exception hierarchy."""
 
 from pathlib import Path
 
@@ -14,8 +14,6 @@ from app.exceptions import (
 )
 from app.exporter.excel_exporter import ExcelExporter
 from app.exporter.file_manager import FileManager
-from app.extractor.lead_extractor import LeadExtractor
-from app.validator.validator import Validator
 
 
 def test_exceptions_share_common_base() -> None:
@@ -37,18 +35,6 @@ def test_export_exception_is_raiseable() -> None:
 
 def test_browser_manager_starts_idle() -> None:
     assert not BrowserManager().is_running()
-
-
-def test_lead_extractor_is_scaffolded() -> None:
-    with pytest.raises(NotImplementedError):
-        LeadExtractor().extract("<html></html>")
-
-
-def test_validator_is_scaffolded() -> None:
-    from app.models.lead import Lead
-
-    with pytest.raises(NotImplementedError):
-        Validator().validate(Lead(business_name="Acme"))
 
 
 def test_excel_exporter_is_implemented(tmp_path: Path) -> None:
