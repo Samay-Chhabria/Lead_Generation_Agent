@@ -8,17 +8,27 @@ leads with a website URL, the pipeline enriches them by discovering an email
 address from the company's own website before the browser is released. The
 pipeline guarantees that both the provider and the factory's browser are
 released after every run, even when the run fails.
+
+Extracted leads can also be handed to the data processing pipeline (normalize,
+validate, deduplicate) through ``process_leads``, which keeps the search and
+processing concerns separate while making cleaned leads available to callers.
+Cleaned leads are written to an .xlsx workbook through ``export_leads``, which
+delegates to the ExcelExporter without re-processing the data.
 """
 
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 from app.config.logging_config import get_logger
 from app.exceptions.provider_exception import ProviderInitializationError, ProviderSearchError
+from app.exporter.excel_exporter import ExcelExporter
+from app.exporter.file_manager import FileManager
 from app.extractor.contact_page_crawler import ContactPageCrawler
 from app.models.lead import Lead
 from app.models.search_plan import SearchPlan
+from app.processing.processing_pipeline import ProcessingPipeline, ProcessingResult
 from app.providers.base_provider import BaseProvider
 from app.providers.provider_factory import ProviderFactory
 from app.providers.provider_result import ProviderResult
@@ -32,10 +42,16 @@ class SearchPipeline:
         factory: ProviderFactory,
         logger: logging.Logger | None = None,
         crawler: ContactPageCrawler | None = None,
+        processing: ProcessingPipeline | None = None,
+        exporter: ExcelExporter | None = None,
     ) -> None:
         self._factory = factory
         self._logger = logger or get_logger("pipeline")
         self._crawler = crawler or ContactPageCrawler(factory.settings, logger=self._logger)
+        self._processing = processing or ProcessingPipeline(logger=self._logger)
+        self._exporter = exporter or ExcelExporter(
+            file_manager=FileManager(factory.settings.output_dir), logger=self._logger
+        )
         self._logger.info("Search pipeline initialized.")
 
     def run(self, plan: SearchPlan) -> ProviderResult:
@@ -103,6 +119,43 @@ class SearchPipeline:
             raise ProviderInitializationError(
                 f"Failed to initialize provider '{provider.plan.provider}': {exc}"
             ) from exc
+
+    def process_leads(self, leads: list[Lead]) -> ProcessingResult:
+        """Clean extracted leads through the data processing pipeline.
+
+        Normalizes every lead, validates it, and removes duplicates. The
+        returned ProcessingResult exposes the final leads and the processing
+        statistics. Missing or malformed data never raises and unusable leads
+        are skipped (Requirement 7).
+
+        Args:
+            leads: The raw extracted leads to process.
+
+        Returns:
+            A ProcessingResult with the final, clean leads.
+        """
+        return self._processing.process(leads)
+
+    def export_leads(
+        self, leads: list[Lead], business_type: str, location: str | None = None
+    ) -> Path:
+        """Export processed leads to an .xlsx workbook.
+
+        Delegates to the injected ExcelExporter, which builds the workbook and
+        resolves a meaningful filename (Requirement 8, 9, 10). The leads are
+        written exactly as provided — no normalization or validation happens
+        here.
+
+        Args:
+            leads: The processed leads to export.
+            business_type: The business category used for the filename.
+            location: Optional target location used for the filename.
+
+        Returns:
+            The path of the saved workbook.
+        """
+        self._logger.info("Exporting leads...")
+        return self._exporter.export(leads, business_type, location)
 
     def _enrich_leads(self, leads: list[Lead], page: Any) -> list[Lead]:
         """Discover website emails for leads that have a website URL.

@@ -10,6 +10,7 @@ class LeadGenerationError(Exception):
 
 
 from app.exceptions.browser_exception import BrowserException  # noqa: E402
+from app.exceptions.export_exception import ExportException  # noqa: E402
 from app.exceptions.extraction_exception import ExtractionException  # noqa: E402
 from app.exceptions.parser_exception import ParserException  # noqa: E402
 from app.exceptions.provider_exception import (  # noqa: E402
@@ -25,6 +26,7 @@ from app.exceptions.provider_exception import (  # noqa: E402
 __all__ = [
     "LeadGenerationError",
     "BrowserException",
+    "ExportException",
     "ExtractionException",
     "ParserException",
     "ProviderException",
