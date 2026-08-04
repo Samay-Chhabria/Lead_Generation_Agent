@@ -48,6 +48,15 @@ def test_application_run_returns_zero(
     assert LeadGenerationApplication(settings=settings, factory=factory).run(prompt=_PROMPT) == 0
 
 
+def test_application_run_returns_nonzero_on_failed_prompt(
+    settings: Settings,
+    factory: ProviderFactory,
+) -> None:
+    assert (
+        LeadGenerationApplication(settings=settings, factory=factory).run(prompt="no location") == 1
+    )
+
+
 def test_application_logs_lifecycle(
     caplog: pytest.LogCaptureFixture,
     settings: Settings,

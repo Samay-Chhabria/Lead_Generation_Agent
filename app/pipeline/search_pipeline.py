@@ -157,6 +157,45 @@ class SearchPipeline:
         self._logger.info("Exporting leads...")
         return self._exporter.export(leads, business_type, location)
 
+    def run_and_export(
+        self,
+        plan: SearchPlan,
+        business_type: str | None = None,
+        location: str | None = None,
+    ) -> tuple[ProviderResult, ProcessingResult, Path]:
+        """Run the provider lifecycle, process leads, and export a workbook.
+
+        Combines run, process_leads, and export_leads so callers receive the
+        provider result, the processing result, and the exported workbook path
+        from one call. The provider and browser are released exactly as in
+        run; missing or failing leads never stop the run.
+
+        Args:
+            plan: The search plan describing what to search for.
+            business_type: Optional override for the workbook filename.
+            location: Optional override for the workbook filename.
+
+        Returns:
+            A tuple of the ProviderResult, the ProcessingResult, and the path
+            of the saved workbook.
+
+        Raises:
+            ProviderInitializationError: When the provider fails to initialize.
+            ProviderSearchError: When the provider cannot complete the search.
+            UnknownProviderError: When the plan selects an unregistered provider.
+            ExportException: When the workbook cannot be built or saved.
+        """
+        provider_result = self.run(plan)
+        processing_result = self.process_leads(provider_result.leads)
+        self._logger.info("Processing completed.")
+        path = self.export_leads(
+            processing_result.leads,
+            business_type or plan.business_type,
+            location if location is not None else plan.location,
+        )
+        self._logger.info("Excel exported.")
+        return provider_result, processing_result, path
+
     def _enrich_leads(self, leads: list[Lead], page: Any) -> list[Lead]:
         """Discover website emails for leads that have a website URL.
 

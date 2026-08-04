@@ -46,8 +46,10 @@ class LeadGenerationApplication:
                 logger=self._logger,
                 factory=self._factory,
             )
-            agent.run(prompt)
-            return 0
+            result = agent.run(prompt)
+            if result.success:
+                return 0
+            return 1
         except Exception as exc:
             self._logger.exception("Application failed: %s", exc)
             return 1
