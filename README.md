@@ -1,308 +1,588 @@
 # Lead Generation Agent
 
-An AI-powered agent that turns a single natural-language prompt — such as
-**"software companies in Karachi"** — into a ready-to-use Excel lead list.
+> Turn a single natural-language prompt — **"software companies in Karachi"** —
+> into a clean, deduplicated Excel lead list, automatically.
 
-The agent parses the prompt, drives a real browser (Playwright) to search
-business listing websites, extracts contact details for each business,
-cleans and deduplicates the data, and exports everything to a formatted
-`.xlsx` workbook — all with graceful handling of missing data and a clear
-execution summary at the end.
+The **Lead Generation Agent** is an AI-powered application that understands a
+plain-English business search request, plans the work, drives a real browser
+(Playwright) through business listing websites, extracts contact details for
+each business, cleans and deduplicates the data, and exports everything to a
+formatted `.xlsx` workbook — then summarizes what it did. It is built as a real
+agent: **plan → tool selection → execute → recover → validate → export →
+summarize**.
 
-All 14 assignment requirements are implemented and covered by an automated
-test suite (unit, integration, end-to-end, requirement, and performance).
+## Table of Contents
+
+- [Project Overview](#project-overview)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Folder Structure](#folder-structure)
+- [Installation](#installation)
+- [Setup](#setup)
+  - [Virtual Environment Setup](#virtual-environment-setup)
+  - [Install Dependencies](#install-dependencies)
+  - [Playwright Installation](#playwright-installation)
+  - [Environment Configuration](#environment-configuration)
+- [Running](#running)
+  - [Running the CLI](#running-the-cli)
+  - [Running the Desktop GUI](#running-the-desktop-gui)
+  - [Example Search Prompts](#example-search-prompts)
+- [Generated Excel Files](#generated-excel-files)
+- [Logging](#logging)
+- [Debug Folder](#debug-folder)
+- [Screenshots](#screenshots)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
+- [Known Limitations](#known-limitations)
+- [Future Improvements](#future-improvements)
+- [License](#license)
+- [Author](#author)
+
+## Project Overview
+
+The user provides only a prompt, e.g.:
+
+```text
+coffee shops in Karachi
+```
+
+The agent automatically:
+
+1. **Plans** the task — extracts the business type (`coffee shops`) and
+   location (`Karachi`) deterministically, optionally asking the configured LLM
+   to pick the tool sequence (offline fallback always works).
+2. **Launches a real browser** (Playwright/Chromium) and searches a business
+   listing website (Google Maps).
+3. **Collects** business listings up to the configured limit (`MAX_LEADS`,
+   default **5**; never more than **10** without an explicit count in the
+   prompt), scrolling the results feed as needed and stopping early once enough
+   strong candidates are found.
+4. **Extracts** the name, email, phone number, website, and location from each
+   business page, and crawls each business's own website to discover an email
+   when the listing has none.
+5. **Recovers** from failures — navigation is retried once, consent dialogs are
+   dismissed automatically, and a business that cannot be opened is skipped so
+   the rest are still processed.
+6. **Validates and processes** the leads — filters by any requested minimum
+   rating, normalizes, validates, and deduplicates.
+7. **Exports** the final leads to a formatted `.xlsx` workbook with a
+   meaningful filename.
+8. **Summarizes** the run with a human-readable summary and a console report.
 
 ## Features
 
-- **Natural-language input** — describe what to search for and where; no
-  manual field entry required (`app/parser`).
-- **Browser automation** — Playwright drives a real Chromium instance, so no
-  API keys or subscription services are needed (`app/browser`).
-- **Modular search providers** — Google Maps is implemented out of the box;
-  Bing Maps, Yellow Pages, and Yelp slots are reserved and swappable
-  (`app/providers`).
-- **Five contact fields** — business name, email, phone number, website, and
-  location are collected whenever available (`app/extractor`).
-- **Email enrichment** — when a business has a website, the agent crawls it
-  (including contact/about pages) to discover an email address.
+- **Autonomous agent loop** — `Planner` → `AgentExecutor` → `ToolManager` with
+  internal reasoning, tool selection, and failure recovery.
+- **Natural-language input** — no hand-written queries; business type and
+  location are parsed automatically.
+- **One unified LLM gateway** — the agent talks only to **Free LLM Router**, a
+  single OpenAI-compatible endpoint unlocked by one API key. No per-vendor SDKs
+  or providers exist in the active path.
+- **Zero model management** — every request is sent with `model="auto"` and the
+  router picks the best model itself. The app keeps **no model list, no fallback
+  chain, and no model configuration** to maintain — there is nothing to reorder
+  or update when new models appear.
+- **Automatic Offline ↔ AI mode switching** — `ENABLE_LLM=true` + a
+  `FREELLM_API_KEY` enables **AI Agent Mode** (the LLM understands the request,
+  builds a plan, picks tools, observes results, and keeps going until done).
+  `ENABLE_LLM=false` or an empty key drops to deterministic **Offline Mode**:
+  the parser, browser automation, and Excel export all keep working with no
+  network calls and no runtime errors.
+- **13-tool registry** — search, navigation, business collection/extraction,
+  website crawling, email/phone extraction, export, summary, and the legacy
+  pipeline-as-a-tool, resolved by name and executed through a guarded
+  `ToolManager`.
+- **Real browser automation** — Playwright drives real Chromium; no API keys or
+  paid listing APIs are needed.
+- **Five contact fields per business** — name, email, phone, website, location
+  — plus **website email enrichment** (homepage → contact/about pages).
 - **Configurable volume** — collect 10, 25, 50, or 100+ leads via `MAX_LEADS`.
+- **Intelligent result selection** — the default is **5** businesses and a run
+  never collects more than **10** without an explicit request; say *"find 3
+  coffee shops"*, *"collect 50 software companies"*, or *"top 10 restaurants"* to
+  control the volume. Collected candidates are ranked by rating, review count,
+  website, verified marker, and position before extraction, and scrolling stops
+  early once enough strong results are found.
 - **Robust data handling** — missing fields become empty strings, unusable
-  records are skipped, and duplicates are removed; one failure never aborts
-  the run (`app/processing`).
-- **Excel export** — a formatted `.xlsx` workbook with a meaningful,
-  collision-safe filename such as `leads_software_companies_Karachi.xlsx`
-  (`app/exporter`).
-- **Execution summary** — a boxed console report shows the query, counts,
-  output file, and elapsed time.
-- **Logging** — console plus a rotating file log (`logs/application.log`).
-
-## How It Works
-
-1. **Parse** — the natural-language prompt is turned into a structured
-   `SearchPlan` (business type, location, provider, max results).
-2. **Search** — the provider opens the listing site and collects business
-   references, scrolling the results feed as needed.
-3. **Extract** — each business page is opened and its name, email, phone,
-   website, and location are extracted defensively.
-4. **Enrich** — businesses with a website are crawled for an email address
-   (homepage first, then contact/about pages).
-5. **Process** — leads are normalized, validated, and deduplicated.
-6. **Export** — the final leads are written to a formatted `.xlsx` workbook.
-7. **Summarize** — a console summary reports what was collected and where it
-   was saved.
-
-A failure at any stage — an unavailable website, a provider outage, a
-write-protected directory — is contained: already-collected data is preserved
-and the application never crashes with a runtime error.
+  records are skipped, duplicates are removed; one failure never aborts a run.
+- **Failure recovery** — navigation retry, consent-dialog dismissal, and
+  per-business skip with retry.
+- **Professional Excel export** — formatted `.xlsx` with a bold frozen header,
+  auto-sized columns, and meaningful collision-safe filenames.
+- **Two interfaces** — an interactive CLI and a **PySide6 desktop GUI** with a
+  live execution timeline, streaming logs, statistics, a progress bar, and a
+  completion screen.
+- **Modular providers** — Google Maps is implemented; Bing Maps, Yellow Pages,
+  and Yelp ship as registered extension stubs.
+- **Fully tested** — 483 tests (unit, integration, end-to-end, requirement,
+  performance) covering all 14 assignment requirements.
 
 ## Architecture
 
-The application follows a layered, single-responsibility design. Each layer is
+The application follows a layered, single-responsibility design. Every layer is
 injectable and independently testable.
 
-```mermaid
-flowchart TD
-    User["User prompt (CLI arg or interactive)"] --> Main["app/main.py"]
-    Main --> Application["LeadGenerationApplication<br/>config + logging + lifecycle"]
-    Application --> Agent["LeadGenerationAgent<br/>console facade"]
-    Agent --> Pipeline["ApplicationPipeline"]
-    Pipeline --> Parser["PromptParser<br/>prompt -> SearchPlan"]
-    Pipeline --> SearchPipeline["SearchPipeline"]
-    SearchPipeline --> ProviderFactory["ProviderFactory"]
-    ProviderFactory --> Provider["GoogleMapsProvider<br/>(browser automation)"]
-    Provider --> ResultCollector["ResultCollector<br/>business references"]
-    Provider --> BusinessNavigator["BusinessNavigator"]
-    BusinessNavigator --> BusinessDetailExtractor["BusinessDetailExtractor<br/>name, email, phone, website, location"]
-    SearchPipeline --> ContactCrawler["ContactPageCrawler<br/>website email discovery"]
-    ContactCrawler --> WebsiteNavigator
-    ContactCrawler --> EmailDiscoveryEngine
-    SearchPipeline --> Processing["ProcessingPipeline<br/>normalize + validate + deduplicate"]
-    Processing --> Exporter["ExcelExporter<br/>workbook + filename"]
-    Exporter --> Output["outputs/*.xlsx"]
-    Pipeline --> Summary["ExecutionSummary<br/>console report"]
-    User --> Browser["Playwright Browser<br/>launched/closed by BrowserManager"]
-    Browser --> Provider
+```
+            User prompt (interactive)
+                             |
+                             v
+                       app/main.py  (entry point only)
+                             |
+                             v
+        LeadGenerationApplication  (config + logging + lifecycle)
+                             |
+                             v
+        LeadGenerationAgent  (console facade: plan -> run -> summarize)
+                             |
+             +---------------+---------------+
+             |                               |
+             v                               v
+      Planner (prompt -> TaskPlan)      LLM gateway (Free LLM Router)
+      LLM-first, parser fallback        ENABLE_LLM + API key -> AI mode
+             |                          else deterministic offline mode
+             v
+       AgentExecutor (agent loop: reason -> run -> fold -> recover)
+             |
+             v
+        ToolManager (guarded tool execution)
+             |
+             v
+      Tools: search | navigation | collection | extraction |
+             |  website crawl | email/phone | export | summary
+             |
+             v
+      SearchPipeline / PipelineTool
+        |        |
+        |        +--> ProcessingPipeline (normalize + validate + dedupe)
+        |                        |
+        v                        v
+   ProviderFactory           ExcelExporter -> outputs/*.xlsx
+        |
+        v
+   GoogleMapsProvider (real Playwright browser via BrowserManager)
+        |
+        +--> ResultCollector (business references)
+        +--> BusinessNavigator -> BusinessDetailExtractor
+                              (name, email, phone, website, location)
+        +--> ContactPageCrawler -> WebsiteNavigator + EmailDiscoveryEngine
 ```
 
-- **`app/main.py`** — entry point only; passes the prompt through.
-- **`app/application`** — application lifecycle: configuration, logging,
-  clean startup and shutdown.
-- **`app/agent`** — console-facing agent facade.
-- **`app/parser`** — deterministic prompt-to-`SearchPlan` parsing.
-- **`app/browser`** — Playwright lifecycle (launch, context, page, close).
-- **`app/providers`** — search providers, registry, factory, result collector.
-- **`app/extractor`** — business detail extraction and website email discovery.
-- **`app/processing`** — normalization, validation, deduplication.
-- **`app/exporter`** — Excel workbook construction and output file handling.
-- **`app/models`** — `Lead`, `SearchPlan`, `BusinessReference`,
-  `ExecutionResult`, and related types.
-- **`app/config`** — environment-driven settings, constants, and logging.
-- **`app/utils`** — helpers and the execution summary renderer.
-- **`app/exceptions`** — a single exception hierarchy rooted at
-  `LeadGenerationError`.
+| Layer | Responsibility |
+| --- | --- |
+| `app/main.py` | Entry point only; starts the interactive prompt. |
+| `app/application/` | Application lifecycle: configuration, logging, clean startup and shutdown. |
+| `app/agent/` | Agent facade, planner, executor (agent loop), tool manager, memory, and state. |
+| `app/tools/` | 13 tools: search, navigation, collection, extraction, details, crawl, email, phone, export, pipeline, summary. |
+| `app/parser/` | Deterministic prompt-to-`SearchPlan` parsing (used by the pipeline tool). |
+| `app/gui/` | The PySide6 desktop GUI. It subscribes only to the `AgentExecutionLogger` event bus — no business logic. |
+| `app/llm/` | Unified LLM gateway (Free LLM Router) plus the offline mock fallback. |
+| `app/browser/` | Playwright lifecycle management plus failure recovery. |
+| `app/providers/` | Search providers, registry, factory, result collector. |
+| `app/extractor/` | Business detail extraction and website email discovery. |
+| `app/processing/` | Normalization, validation, deduplication. |
+| `app/exporter/` | Excel workbook construction and output file handling. |
+| `app/models/` | `Lead`, `SearchPlan`, `BusinessReference`, `ExecutionResult`, `TaskPlan`, `ExecutionPlan`. |
+| `app/config/` | Environment-driven settings, constants, and logging. |
+| `app/utils/` | Helpers, execution summary renderer, retry, timer. |
+| `app/exceptions/` | Single exception hierarchy rooted at `LeadGenerationError`. |
 
 ## Folder Structure
 
 ```
-lead-generation-agent/
-├── app/
-│   ├── main.py                    # Application entry point
-│   ├── application/               # Lifecycle orchestration
-│   ├── agent/                     # Console-facing agent facade
-│   ├── parser/                    # Natural-language prompt parsing
-│   ├── browser/                   # Playwright lifecycle management
-│   ├── providers/                 # Search providers and result collection
-│   ├── extractor/                 # Business detail and email extraction
-│   ├── processing/                # Normalization, validation, deduplication
-│   ├── exporter/                  # Excel (.xlsx) export
-│   ├── models/                    # Lead, SearchPlan, ExecutionResult
-│   ├── config/                    # Settings, constants, logging
-│   ├── utils/                     # Helpers, execution summary
-│   └── exceptions/                # Custom exception hierarchy
-├── tests/                         # pytest suite (unit, integration, E2E,
-│                                  # requirement, performance)
-├── docs/                          # Architecture, requirement compliance,
-│                                  # project summary, submission checklist
-├── outputs/                       # Generated Excel workbooks
-├── logs/                          # Rotating application logs
-├── requirements.txt               # Runtime dependencies
-├── pyproject.toml                 # Packaging, tooling, pytest config
-├── .env.example                   # Environment variable template
+Lead_Generation_Agent/
+├── app/                          # Application source code
+│   ├── main.py                   # Entry point
+│   ├── agent/                    # Planner, executor, tool manager, memory, state
+│   ├── application/              # Lifecycle: config, logging, exit code
+│   ├── gui/                      # Desktop GUI (PySide6)
+│   ├── tools/                    # 13-tool registry and wrappers
+│   ├── llm/                      # Unified LLM gateway (Free LLM Router) + offline mock
+│   ├── parser/                   # Prompt → SearchPlan
+│   ├── browser/                  # Playwright lifecycle management + recovery
+│   ├── providers/                # Search providers, registry, factory
+│   ├── extractor/                # Business detail + email extraction
+│   ├── processing/               # Normalize, validate, deduplicate
+│   ├── exporter/                 # Excel (.xlsx) export
+│   ├── models/                   # Data models
+│   ├── config/                   # Settings, constants, logging config
+│   ├── utils/                    # Helpers, execution summary, retry, timer
+│   └── exceptions/               # Custom exception hierarchy
+├── tests/                        # 483 tests (unit/integration/E2E/requirement)
+├── docs/                         # Architecture, compliance, summary, guides
+├── outputs/                      # Generated Excel workbooks (git-ignored)
+├── logs/                         # Rotating application logs (git-ignored)
+├── debug/                        # Screenshots + HTML dumps (git-ignored)
+├── .env.example                  # Environment variable template
 ├── .gitignore
-└── README.md
+├── .python-version               # Python version hint
+├── pyproject.toml                # Packaging, tooling, pytest config
+├── requirements.txt              # Dependencies
+├── README.md                     # This file
+├── RUN_GUIDE.md                  # Beginner run guide
+├── DEVELOPER_GUIDE.md            # Architecture & extension guide
+├── PROJECT_STRUCTURE.md          # Folder-by-folder reference
+├── TESTING.md                    # Manual testing checklist
+├── CHANGELOG.md                  # Version history
+├── CONTRIBUTING.md               # Contribution guide
+├── CODE_OF_CONDUCT.md
+└── LICENSE                       # MIT
 ```
+
+See [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for a folder-by-folder
+reference, and [RUN_GUIDE.md](RUN_GUIDE.md) for a beginner-friendly setup
+walkthrough.
 
 ## Installation
 
-Requires **Python 3.12 or newer**.
+### Prerequisites
+
+- **Python 3.12 or newer** (enforced by `pyproject.toml`).
+- **Git** (to clone the repository).
+- An internet connection (for installing dependencies, downloading the Playwright
+  browser binary, and searching live business listing sites).
+
+### Clone the Repository
 
 ```bash
-# 1. Create and activate a virtual environment
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-# Linux / macOS
-source .venv/bin/activate
-
-# 2. Install runtime dependencies
-pip install -r requirements.txt
-
-# 3. Install the Playwright browser used for automation
-playwright install chromium
+git clone https://github.com/Samay-Chhabria/Lead_Generation_Agent.git
+cd Lead_Generation_Agent
 ```
 
-Optional development tooling (Black, Ruff, pytest):
+## Setup
+
+### Virtual Environment Setup
+
+Create and activate an isolated Python environment:
+
+```bash
+python -m venv .venv
+```
+
+| Operating system | Activation command |
+| ---------------- | ------------------ |
+| Windows PowerShell | `.venv\Scripts\Activate.ps1` |
+| Windows CMD | `.venv\Scripts\activate.bat` |
+| Linux / macOS | `source .venv/bin/activate` |
+
+> If PowerShell blocks activation, run once:
+> `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
+
+### Install Dependencies
+
+With the virtual environment active:```bash
+pip install -r requirements.txt
+```
+
+Runtime dependencies: `playwright`, `python-dotenv`, `openpyxl`, `rich`,
+`PySide6`. Developer tooling (Black, Ruff, pytest):
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-## Setup & Configuration
+### Playwright Installation
 
-Copy the environment template and adjust values if needed:
+The Playwright Python package contains the automation *library* only — the
+browser binary must be downloaded separately:
+
+```bash
+playwright install chromium
+```
+
+Or install all supported engines (Chromium, Firefox, WebKit):
+
+```bash
+playwright install
+```
+
+Verify:
+
+```bash
+playwright --version
+playwright install --list
+```
+
+> If `playwright` is not recognized, run it through Python:
+> `python -m playwright install chromium`
+
+### Environment Configuration
+
+Copy the template and adjust values if needed:
 
 ```bash
 cp .env.example .env
 ```
 
-| Variable          | Description                                     | Default     |
-| ----------------- | ----------------------------------------------- | ----------- |
-| `HEADLESS`        | Run the browser in headless mode                | `true`      |
-| `TIMEOUT`         | Default browser timeout in milliseconds         | `30000`     |
-| `MAX_LEADS`       | Maximum number of leads to collect              | `25`        |
-| `SEARCH_PROVIDER` | Search provider name                            | `google`    |
-| `BROWSER_TYPE`    | Browser engine (`chromium`, `firefox`, `webkit`)| `chromium`  |
-| `OUTPUT_DIR`      | Directory for generated workbooks               | `outputs`   |
-| `LOG_DIR`         | Directory for log files                         | `logs`      |
-| `LOG_LEVEL`       | Logging verbosity (`CRITICAL`…`DEBUG`)          | `INFO`      |
+The application loads `.env` automatically at startup (`python-dotenv`). It is
+git-ignored — never commit it.
 
-Supported `SEARCH_PROVIDER` values: `google`, `google_maps` (implemented),
-plus `bing_maps`, `yellow_pages`, and `yelp` (reserved provider slots).
+| Variable | Default | Allowed values | Purpose |
+| --- | --- | --- | --- |
+| `PLAYWRIGHT_HEADLESS` | `true` | `true`/`false` | Run the browser without a visible window (alias `HEADLESS`). |
+| `PLAYWRIGHT_TIMEOUT` | `30000` | positive integer (ms) | Maximum wait for page loads and results (alias `TIMEOUT`). |
+| `LEAD_MAX_RESULTS` | `5` | positive integer | Default maximum businesses to collect (alias `MAX_LEADS`). The default is 5; without an explicit request the run never exceeds 10. |
+| `SEARCH_PROVIDER` | `google` | see below | Which search provider the pipeline uses. |
+| `BROWSER_TYPE` | `chromium` | `chromium`, `firefox`, `webkit` | Browser engine. |
+| `BROWSER_SLOW_MO` | `300` | non-negative integer (ms) | Artificial delay between browser actions (visual debugging); `0` disables it only when running headless. |
+| `OUTPUT_DIR` | `outputs` | any path | Where Excel workbooks are saved. |
+| `LOG_DIR` | `logs` | any path | Where the rotating log is written. |
+| `LOG_LEVEL` | `INFO` | `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG` | Logging verbosity (use `DEBUG` for detailed diagnostics). |
+| `LLM_PROVIDER` | `freellm` | `freellm` | LLM gateway (only one exists; legacy names `freellmrouter`/`free_llm_router` still normalize to it). |
+| `LLM_MODEL` | `auto` | must be `auto` | Fixed to `auto` — the router selects the model on every request. |
+| `ENABLE_LLM` | `true` | `true`/`false` | Master switch for AI Agent Mode. |
+| `FREELLM_API_KEY` | *(empty)* | key string | Your Free LLM Router API key. Empty ⇒ Offline Mode. (Legacy alias: `LLM_API_KEY`.) |
+| `FREELLM_BASE_URL` | `http://localhost:3001/v1` | URL | The router's OpenAI-compatible endpoint. (Legacy alias: `LLM_BASE_URL`.) |
 
-Configuration is validated on startup. Invalid values — a non-positive
-`TIMEOUT`/`MAX_LEADS`, an unsupported provider, or an unknown `LOG_LEVEL` —
-abort the application with a clear error message. Output and log directories
-are created automatically if they do not exist.
+**Supported `SEARCH_PROVIDER` values:** `google`, `google_maps` (both map to
+the implemented Google Maps provider) and the reserved extension slots
+`bing_maps`, `yellow_pages`, `yelp`.
+
+Configuration is validated at startup; invalid values abort with a clear error.
+`OUTPUT_DIR` and `LOG_DIR` are created automatically if they do not exist.
+
+### AI Agent Mode vs Offline Mode
+
+The application is model-agnostic and decides its mode automatically at startup:
+
+| Condition | Mode | What happens |
+| --- | --- | --- |
+| `ENABLE_LLM=true` **and** `FREELLM_API_KEY` set | **AI Agent Mode** | The LLM understands your request, reasons about the task, builds an execution plan, chooses tools, observes tool outputs, and iterates until the task is done. Browser automation is just one tool among many. |
+| `ENABLE_LLM=false` | **Offline Mode** | The deterministic parser extracts business type + location, and the default tool sequence runs. LLM reasoning is skipped. |
+| `FREELLM_API_KEY` empty | **Offline Mode** | Same deterministic behaviour; no network calls, no runtime errors. |
+
+In both modes the CLI, GUI, browser automation, Excel export, and pipeline
+behave exactly the same — only the planning intelligence differs.
+
+### Getting a Free LLM Router API key
+
+1. Follow the [Free LLM Router](https://github.com/freellm/free-llm-router)
+   docs to run or reach your router instance (it exposes a single
+   OpenAI-compatible endpoint).
+2. Obtain your API key from the router (a self-hosted router, or the service
+   you chose). One key unlocks whichever models your router instance exposes —
+   the exact list depends on the router, and new models are picked up
+   automatically with `model="auto"`.
+3. Paste the key into `.env`:
+   ```dotenv
+   ENABLE_LLM=true
+   LLM_PROVIDER=freellm
+   FREELLM_API_KEY=your-key-here
+   FREELLM_BASE_URL=http://localhost:3001/v1
+   LLM_MODEL=auto
+   ```
+4. Restart the application. The console/desktop GUI shows `ai` mode when active.
+
+### Model selection (`model="auto"`)
+
+The application implements **no model list and no fallback chain**. Every LLM
+request is sent to the router with `model="auto"`, and the **router** decides
+which model to use — it is the single place where models are chosen, so there
+is nothing to configure or maintain on the application side. New models added
+to your router are picked up automatically with no code or config changes.
+
+The only two variables that matter are `FREELLM_BASE_URL` (where the router
+lives) and `FREELLM_API_KEY` (authentication). `LLM_MODEL` is fixed to `auto`;
+any other value is rejected at startup.
+
+If the router cannot be reached (connection error, DNS failure, or timeout) the
+request is retried up to 2 times with a short backoff, then the error is
+reported. Model-related failures are handled entirely by the router — the
+application never rotates, skips, or tracks models on its own.
+
+The GUI, console logs, and Excel output report the model the router actually
+used (via the response's `model` field), or `Auto (Router Selected)` when it is
+not reported.
+
+> No secrets belong in `.env.example` — it ships with a blank API key, which
+> puts the application in Offline Mode out of the box.
 
 ## Running
 
-Pass a prompt as a command-line argument:
+### Running the CLI
 
-```bash
-python app/main.py "software companies in Karachi"
-```
-
-Without an argument, the application asks for the search interactively:
+Run the application and type your search when prompted:
 
 ```bash
 python app/main.py
 ```
 
-Example prompts:
+The banner prints `Lead Generation Agent Ready` followed by
+`Please enter your search:`. Type a natural-language request such as
+`software companies in Karachi` and press Enter. A successful run ends with a
+boxed console summary, and the workbook appears in `outputs/`.
 
-- `coffee shops in America`
-- `dentists in Lahore`
-- `software companies in Karachi`
-- `marketing agencies in Dubai`
-- `plumbers in New York`
+### Running the Desktop GUI
 
-Expected console output:
-
-```
-INFO  Application starting...
-INFO  Loading configuration...
-INFO  Logging initialized.
-Lead Generation Agent v0.1.0 is ready to use.
-
-Search Plan
-========================================
-Original Prompt: software companies in Karachi
-Business Type: software companies
-Location: Karachi
-Provider: google
-Maximum Leads: 25
-
-========================================
-Lead Generation Completed Successfully
-========================================
-Search Query: software companies in Karachi
-Business Type: software companies
-Location: Karachi
-Provider: Google
-Businesses Found: 8
-Documents Removed: 1
-Leads Exported: 7
-Output File: C:\...\outputs\leads_software_companies_Karachi.xlsx
-Execution Time: 12.3 seconds
-========================================
-INFO  Application shutting down...
-```
-
-## Output & Logs
-
-- **Excel workbook** — saved to `OUTPUT_DIR` with a meaningful filename
-  (`leads_<business_type>_<location>.xlsx`). If the file already exists a
-  timestamp is appended so previous exports are never overwritten. The
-  workbook opens in Excel with a single `Leads` sheet containing the columns:
-  Business Name, Email, Phone Number, Website, Location, Provider,
-  Search Query, Collected At, and Source URL.
-- **Log file** — all records are mirrored to `LOG_DIR/application.log`,
-  rotated at 5 MB with 3 backups.
-
-## Testing & Quality
+A full desktop application (`app/gui/main.py`) shows the agent running live. It
+is a pure presentation layer too: it subscribes to the same
+`AgentExecutionLogger` event bus as the terminal renderer, runs the agent on a
+worker thread, and renders every event on the main thread — none of the
+planning, search, extraction, or export logic lives in the GUI.
 
 ```bash
-pytest                  # run the full test suite
+python -m app.gui.main
+```
+
+The window provides:
+
+- A **prompt bar** with a Search button (and `Ctrl+Enter`).
+- An **Agent Plan** panel — business type, location, provider, maximum results,
+  website crawling, export, and the planned tool steps.
+- An **Execution Timeline** — the canonical steps (understanding, planning,
+  launching the browser, searching, extracting, crawling, exporting, finished)
+  highlighted while active, green when done, red when failed, gray when pending.
+- **Live Logs** — every execution event streamed with color-coded lines.
+- **Statistics** — businesses found/processed, emails, websites, phone numbers,
+  and the current runtime.
+- A **Current Business** card — the business being processed and the live
+  fields being extracted (website / phone / email).
+- A **Progress bar** with the per-business counter (`Business 2 / 5`).
+- An **Error Handling** card — the failing step, status, reason, retry attempts
+  (`Retrying... Attempt 2/3`) and recovery confirmation.
+- A **Results** card — success/failure, counts, execution time, the output
+  workbook, and **Open Excel / Open Folder / Run Again** buttons.
+- **Dark / light themes**, toggled from the header (default from
+  `GUI_THEME` in `.env`).
+
+The theme can be preselected with `GUI_THEME=light` in `.env`, and everything
+else (browser, provider, limits, LLM mode) is configured exactly as for the CLI.
+
+### Example Search Prompts
+
+Run `python app/main.py`, then type one of these at the `Please enter your
+search:` prompt:
+
+```text
+coffee shops in Karachi
+software companies in Lahore
+hospitals in Islamabad
+restaurants near Clifton Karachi
+real estate agencies in Dubai
+digital marketing agencies in London
+book stores in New York
+plumbers in New York
+dentists in Lahore
+find 3 coffee shops in Karachi
+collect 50 software companies in Lahore
+top 10 restaurants in Islamabad
+```
+
+**Query format rule:** the prompt must contain one of the words `in`, `near`,
+or `around` to separate the business type from the location; otherwise the
+parser rejects it with a clear message.
+
+**Result volume rule:** by default a run collects **5** businesses and never
+more than **10** unless you explicitly ask for a different number. Include a
+count in the prompt ("find 3...", "collect 50...", "top 10...") to control how
+many leads are delivered, or raise the global `MAX_LEADS` setting.
+
+## Generated Excel Files
+
+- **Output folder:** `OUTPUT_DIR` (default `outputs/`), created automatically.
+- **Filename format:** `leads_<business_type>_<location>.xlsx`
+  (e.g. `leads_software_companies_Karachi.xlsx`). Spaces become underscores,
+  illegal filename characters are stripped, and a timestamp is appended if the
+  file already exists — previous exports are never overwritten.
+- **Workbook:** a single `Leads` sheet with a bold, frozen header and
+  auto-sized columns.
+- **Columns:** Business Name, Email, Phone Number, Website, Location, Provider,
+  Search Query, Collected At, Source URL.
+
+## Logging
+
+- **Location:** all records are mirrored to `LOG_DIR/application.log` (default
+  `logs/application.log`), rotated at 5 MB with 3 backups.
+- **Levels:** `CRITICAL`, `ERROR`, `WARNING`, `INFO` (default), `DEBUG`.
+- **Enable DEBUG mode:** set `LOG_LEVEL=DEBUG` in `.env`. Debug records include
+  per-step reasoning, selector attempts, consent-dialog checks, and screenshot
+  saves.
+
+## Debug Folder
+
+- **Location:** `debug/` (relative to the working directory).
+- **Contents:** full-page **screenshots** (`navigation.png`,
+  `before_search.png`, `after_search.png`, `results.png`, `before_scroll.png`,
+  `after_scroll.png`, `extraction_failure.png`, `selector_failure.png`) and
+  **HTML dumps** (`page.html`, `results_failure.html`,
+  `selector_failure.html`, `extraction_failure.html`), plus
+  `provider_export.json` with the collected references.
+- Screenshots and HTML are captured automatically around key browser steps and
+  on failures, which is the first place to look when a live search goes wrong.
+
+## Screenshots
+
+> Screenshots are placeholders — add `docs/screenshots/console_summary.png`,
+> `docs/screenshots/gui_dashboard.png`, and
+> `docs/screenshots/workbook.png` here.
+
+| Console summary | GUI dashboard | Excel workbook |
+| --- | --- | --- |
+| *placeholder* | *placeholder* | *placeholder* |
+
+## Testing
+
+```bash
+pytest                  # run the full suite (483 tests)
 ruff check app tests    # lint
 black --check app tests # formatting check
+pip check               # no broken dependencies
 ```
 
-The suite is organized into unit, integration, end-to-end, requirement, and
-performance groups. End-to-end tests inject a fake provider, so they never
-touch the network or launch a real browser; only the browser-automation tests
-and the Requirement 3 check launch real Chromium. The 14-requirement
-verification matrix runs with:
-
-```bash
-pytest tests/test_requirement_matrix.py -v
-```
-
-See `docs/REQUIREMENT_COMPLIANCE.md` for the requirement-by-requirement
-compliance table.
+See [TESTING.md](TESTING.md) for a manual testing checklist, and
+`docs/REQUIREMENT_COMPLIANCE.md` for the 14-requirement compliance matrix.
 
 ## Troubleshooting
 
-| Symptom                                                        | Likely cause                                              | Fix                                                                  |
-| -------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------- |
-| `Playwright executable doesn't exist` or browser launch fails  | Chromium not installed                                    | Run `playwright install chromium`                                    |
-| `Could not determine a location for prompt`                    | Prompt has no `in`/`near`/`around` separator              | Use a prompt like `"software companies in Karachi"`                  |
-| `SEARCH_PROVIDER must be one of ...`                           | Invalid provider name in `.env`                           | Set `SEARCH_PROVIDER=google` or another supported value               |
-| No leads collected                                             | Search returned no results or provider was blocked        | Check the log file; increase `TIMEOUT`; retry                         |
-| A business has blank email/phone/website                       | The field is genuinely unavailable on the page            | Expected behavior — missing fields are stored as empty strings        |
-| Output file is timestamped                                     | A file with the same name already exists                  | Expected behavior — previous exports are never overwritten            |
-| Slow runs                                                      | Real browser automation against live websites             | Reduce `MAX_LEADS`; increase `TIMEOUT` only if pages time out         |
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| `Executable doesn't exist ...chromium` | Playwright browser not installed | `playwright install chromium` |
+| Browser launch fails at startup | Missing OS libraries / browser binary mismatch | `playwright install chromium`; `pip install -U playwright` |
+| `ModuleNotFoundError: No module named 'app'` | Running from the wrong directory | Run every command from the project root |
+| `SEARCH_PROVIDER must be one of ...` | Invalid provider in `.env` | Use `google` or another supported value |
+| `Could not determine a location for prompt` | Prompt has no `in`/`near`/`around` | Use e.g. `"software companies in Karachi"` |
+| No leads collected | Provider returned nothing or was blocked | Check `logs/application.log`; raise `TIMEOUT`; retry later |
+| Run times out | Page loads slower than `TIMEOUT` | Increase `TIMEOUT`; reduce `MAX_LEADS` |
+| Many blank emails/phones | Businesses do not publish them | Expected behavior — stored as empty strings |
+| Excel file locked / cannot be saved | Workbook open in Excel / no write access | Close the workbook; check `OUTPUT_DIR` permissions |
+| Environment variables not picked up | `.env` missing or misnamed | Copy `.env.example` to `.env` and restart |
+| `Agent mode: offline` though I set a key | `ENABLE_LLM` not `true`, or key empty | Set `ENABLE_LLM=true` and paste the key into `FREELLM_API_KEY` |
+| Model did not change | Edited a model name somewhere else | The router chooses the model (`LLM_MODEL=auto`); point `FREELLM_BASE_URL` at the router you intend to use, then restart |
+| `pip` is not recognized | Environment not active | Activate the virtual environment (see setup) |
 
-Logs in `logs/application.log` contain the full trace of every stage and are
-the first place to look when diagnosing unexpected behavior.
+The log file `logs/application.log` records every stage with timestamps and
+exception traces — it is the first stop for any unexplained behavior.
 
-## Requirements Compliance
+## Known Limitations
 
-All 14 project requirements are implemented and verified by automated tests.
-The compliance matrix (requirement, status, implementing module, and evidence)
-lives in `docs/REQUIREMENT_COMPLIANCE.md`, with the verification details in
-`docs/REQUIREMENT_VERIFICATION.md`.
+- **Only Google Maps is implemented** — `bing_maps`, `yellow_pages`, and
+  `yelp` are registered extension slots that return no results today.
+- **Live Google Maps markup** — extraction depends on the current page
+  structure; layout changes or CAPTCHAs may require selector updates.
+- **Structural email validation only** — emails are matched with a regex, not
+  DNS/MX verification, so an address may still bounce.
+- **Single-location prompts** — parsing handles one location using
+  `in`/`near`/`around`; complex or multi-location prompts are rejected.
+- **Serial extraction** — businesses are processed one at a time; no parallel
+  scraping.
+- **One run = one workbook** — results are not accumulated across runs.
 
 ## Future Improvements
 
-- Implement the reserved Bing Maps, Yellow Pages, and Yelp providers.
-- Parallel scraping across multiple providers to speed up large collections.
+- Implement the reserved Bing Maps, Yellow Pages, and Yelp providers (the
+  registry slots are already wired up).
+- Parallel/async scraping across multiple providers.
 - Proxy rotation and CAPTCHA handling for resilient, large-scale scraping.
-- Alternative exports (CSV, Google Sheets) and CRM integrations.
-- AI-powered lead scoring, company-size data, and LinkedIn/social enrichment.
-- Stronger email verification (DNS/MX checks) beyond structural validation.
-- A richer parsing layer (spaCy NER or an LLM) for complex prompts.
+- CSV / Google Sheets export and CRM integrations.
+- AI-powered lead scoring and enrichment (company size, LinkedIn, social links).
+- Stronger email verification (DNS/MX checks).
+- Web-search-backed planning so the LLM can ground tool selection in live data.
 
 ## License
 
-MIT
+Released under the [MIT License](LICENSE).
+
+## Author
+
+**Lead Generation Agent Team** — built during the AI Season session-4 workshop.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and the
+[Code of Conduct](CODE_OF_CONDUCT.md).

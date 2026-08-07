@@ -15,11 +15,6 @@ from app.models.business_reference import BusinessReference
 from app.models.lead import Lead
 
 BUSINESS_NAME_SELECTORS = ("h1", '[data-attrid="title"]')
-PHONE_SELECTORS = (
-    'a[href^="tel:"]',
-    "[data-phone-number]",
-    'button[data-tooltip*="phone"]',
-)
 WEBSITE_SELECTORS = (
     '[data-attrid="website"] a',
     'a[data-item-id="authority"]',
@@ -29,9 +24,13 @@ LOCATION_SELECTORS = (
     '[data-attrid="address"]',
     'button[data-item-id="address"]',
 )
-EMAIL_SELECTORS = ('a[href^="mailto:"]',)
 
 _MAPS_LINK_MARKERS = ("google.com/maps", "google.com/search")
+
+#: Upper bound for probing a single field selector. Google Maps pages contain
+#: many optional elements; a missing selector must not burn the full default
+#: timeout while extraction probes each one (auto-wait is capped instead).
+SELECTOR_PROBE_TIMEOUT_MS = 1_500
 
 
 class BusinessDetailExtractor:
@@ -139,13 +138,17 @@ class BusinessDetailExtractor:
 
     def _first_text(self, page: Page, selector: str) -> str:
         try:
-            return page.locator(selector).first.inner_text().strip()
+            return (
+                page.locator(selector).first.inner_text(timeout=SELECTOR_PROBE_TIMEOUT_MS).strip()
+            )
         except Exception:
             return ""
 
     def _first_attribute(self, page: Page, selector: str, attribute: str, prefix: str = "") -> str:
         try:
-            value = page.locator(selector).first.get_attribute(attribute)
+            value = page.locator(selector).first.get_attribute(
+                attribute, timeout=SELECTOR_PROBE_TIMEOUT_MS
+            )
         except Exception:
             return ""
         if not value:

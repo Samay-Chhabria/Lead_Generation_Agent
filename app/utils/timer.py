@@ -28,9 +28,9 @@ class Timer:
 
     def __exit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
+        _exc_type: type[BaseException] | None,
+        _exc_value: BaseException | None,
+        _traceback: TracebackType | None,
     ) -> None:
         start = self._started if self._started is not None else time.perf_counter()
         self.elapsed = time.perf_counter() - start

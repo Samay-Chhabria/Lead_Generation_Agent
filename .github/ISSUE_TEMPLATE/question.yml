@@ -1,0 +1,27 @@
+name: Question
+description: Ask a question about setup, usage, or the codebase
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before asking, please check:
+        - The [README](https://github.com/Samay-Chhabria/Lead_Generation_Agent#readme)
+        - The [Troubleshooting section](https://github.com/Samay-Chhabria/Lead_Generation_Agent#troubleshooting)
+        - The [Run Guide](RUN_GUIDE.md)
+        - The [Developer Guide](DEVELOPER_GUIDE.md)
+        - [Existing issues](https://github.com/Samay-Chhabria/Lead_Generation_Agent/issues)
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: Ask your question with enough context to be answered.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What are you trying to do? What have you already tried?
+      placeholder: Optional, but helpful.

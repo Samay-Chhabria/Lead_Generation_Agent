@@ -14,6 +14,7 @@ from playwright.sync_api import Page
 
 from app.config.logging_config import get_logger
 from app.models.business_reference import BusinessReference
+from app.providers.result_selection import extract_card_signals
 
 BUSINESS_CARD_SELECTORS = (
     'div[role="feed"] a[href^="https://www.google.com/maps/place/"]',
@@ -66,10 +67,14 @@ class ResultCollector:
         self._absorb(references, seen)
 
         stalled_scrolls = 0
+        scrolls = 0
+        new_cards: list[int] = []
         while len(references) < self._max_results:
             self._scroll()
+            scrolls += 1
             self._wait_for_new_cards(len(references))
             discovered = self._absorb(references, seen)
+            new_cards.append(discovered)
             if len(references) >= self._max_results:
                 break
             if discovered == 0:
@@ -83,6 +88,7 @@ class ResultCollector:
         self._logger.info("Scrolling completed.")
 
         if len(references) >= self._max_results:
+            self._logger.info("Stopping search early.")
             self._logger.info("Maximum reached (%d businesses).", len(references))
         elif not references:
             self._logger.info("No business references found.")
@@ -156,13 +162,82 @@ class ResultCollector:
         if not name:
             return None
         business_id = entity_id or url or name
+        signals = self._read_signals(element)
         return BusinessReference(
             business_id=business_id,
             business_name=name,
             listing_url=url or None,
             listing_index=index,
             provider=self._provider_name,
+            rating=signals[0],
+            review_count=signals[1],
+            has_website=signals[2],
+            verified=signals[3],
         )
+
+    def _read_signals(self, element) -> tuple[float | None, int | None, bool, bool]:
+        """Read best-effort ranking signals off a card, never failing.
+
+        The card anchor's own text and the surrounding container text are
+        parsed for a rating, review count, website, and verified marker.
+        Explicit data attributes (``data-rating``, ``data-reviews``,
+        ``data-website``, ``data-verified``) override the parsed values, which
+        lets test doubles and provider hints feed deterministic signals. Every
+        step is optional: unavailable signals come back as None/False.
+        """
+        texts: list[str] = []
+        try:
+            texts.append(element.get_attribute("aria-label") or "")
+            texts.append(element.inner_text() or "")
+        except Exception as exc:
+            self._logger.debug("Could not read card signals: %s", exc)
+            return (None, None, False, False)
+        try:
+            parent = element.evaluate("el => (el.closest('div') || {}).innerText || ''")
+            if parent:
+                texts.append(str(parent))
+        except Exception:
+            pass
+        rating, reviews, website, verified = extract_card_signals(*texts)
+        rating = self._override_float(element, "data-rating", rating)
+        reviews = self._override_int(element, "data-reviews", reviews)
+        try:
+            if element.get_attribute("data-website"):
+                website = True
+        except Exception:
+            pass
+        try:
+            if element.get_attribute("data-verified"):
+                verified = True
+        except Exception:
+            pass
+        return (rating, reviews, website, verified)
+
+    @staticmethod
+    def _override_float(element, name: str, current: float | None) -> float | None:
+        try:
+            raw = element.get_attribute(name)
+        except Exception:
+            return current
+        if not raw:
+            return current
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return current
+
+    @staticmethod
+    def _override_int(element, name: str, current: int | None) -> int | None:
+        try:
+            raw = element.get_attribute(name)
+        except Exception:
+            return current
+        if not raw:
+            return current
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return current
 
     def _scroll(self) -> None:
         """Scroll the results feed to its bottom."""

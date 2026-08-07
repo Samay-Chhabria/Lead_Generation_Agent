@@ -10,6 +10,7 @@ import re
 from app.config.settings import Settings, get_settings
 from app.exceptions.parser_exception import ParserException
 from app.models.search_plan import SearchPlan
+from app.providers.result_selection import parse_requested_limit, resolve_result_limit
 
 _SEPARATOR_PATTERN = re.compile(r"\b(in|near|around)\b", re.IGNORECASE)
 
@@ -47,12 +48,13 @@ class PromptParser:
         if not location:
             raise ParserException(f"Missing location in prompt '{prompt}'.")
         settings = settings or get_settings()
+        requested = parse_requested_limit(normalized)
         return SearchPlan(
             original_prompt=normalized,
             business_type=business_type,
             location=location,
             provider=settings.search_provider,
-            max_results=settings.max_leads,
+            max_results=resolve_result_limit(requested, settings.max_leads),
         )
 
     @staticmethod

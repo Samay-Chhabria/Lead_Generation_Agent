@@ -44,9 +44,18 @@ class BrowserFactory:
         playwright = sync_playwright().start()
         try:
             browser_type = self._select_browser(playwright)
+            slow_mo = self._settings.slow_mo
+            if not self._settings.headless:
+                slow_mo = slow_mo or 300
             browser = browser_type.launch(
                 headless=self._settings.headless,
                 timeout=self._settings.timeout,
+                slow_mo=slow_mo,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-first-run",
+                    "--disable-infobars",
+                ],
             )
         except BrowserException:
             playwright.stop()

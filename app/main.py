@@ -1,6 +1,7 @@
 """Application entry point.
 
-Contains no business logic: it only creates the application and runs it.
+Contains no business logic: it only creates the application and runs it. The
+prompt is read interactively from the console ("Please enter your search:").
 
 Run from the repository root with:
 
@@ -16,10 +17,9 @@ from app.application.application import LeadGenerationApplication
 
 
 def main() -> int:
-    """Bootstrap and run the Lead Generation Application."""
-    prompt = sys.argv[1] if len(sys.argv) > 1 else None
+    """Bootstrap and run the Lead Generation Application interactively."""
     application = LeadGenerationApplication()
-    return application.run(prompt)
+    return application.run()
 
 
 if __name__ == "__main__":

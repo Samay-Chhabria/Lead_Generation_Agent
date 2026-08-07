@@ -1,10 +1,10 @@
 """Higher-level search provider abstraction.
 
 SearchProvider extends BaseProvider with shared behaviour for searchable
-business providers. Until concrete providers exist, it also serves as the
-registered placeholder: its search() and collect_results() return empty
-results so the pipeline can run end-to-end without performing any searches.
-Concrete providers override these methods.
+business providers. Concrete providers (Google Maps, Bing Maps, Yellow Pages,
+Yelp) implement only their provider-specific logic by overriding ``search()``
+and ``collect_results()``; the base class supplies the plan, browser, settings,
+and lifecycle handling.
 """
 
 from typing import Any

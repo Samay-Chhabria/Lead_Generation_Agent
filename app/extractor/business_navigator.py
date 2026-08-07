@@ -21,6 +21,8 @@ DETAIL_CONTAINER_SELECTORS = (
     '[data-attrid="title"]',
 )
 
+OPEN_ATTEMPTS = 2
+
 
 class BusinessNavigator:
     """Navigate to a business listing and wait for it to be ready.
@@ -38,6 +40,10 @@ class BusinessNavigator:
     def open(self, reference: BusinessReference, page: Page) -> Page:
         """Open the reference's listing on the given page.
 
+        A failed navigation or a detail container that never renders is
+        retried once before raising, so a slow page load does not drop a
+        business.
+
         Args:
             reference: The business listing to open.
             page: The browser page to navigate.
@@ -53,19 +59,29 @@ class BusinessNavigator:
         url = reference.listing_url
         if not url:
             raise ExtractionException(f"Cannot open '{reference.business_name}': no listing URL.")
-        try:
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=self._settings.timeout,
-            )
-        except Exception as exc:
-            raise ExtractionException(
-                f"Failed to open '{reference.business_name}' at {url}: {exc}"
-            ) from exc
-        self._wait_for_details(page, reference)
-        self._logger.info("Business opened.")
-        return page
+        last_error: Exception | None = None
+        for attempt in range(1, OPEN_ATTEMPTS + 1):
+            try:
+                page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=self._settings.timeout,
+                )
+                self._wait_for_details(page, reference)
+                self._logger.info("Business opened.")
+                return page
+            except Exception as exc:
+                last_error = exc
+                self._logger.warning(
+                    "Open attempt %d/%d failed for '%s': %s",
+                    attempt,
+                    OPEN_ATTEMPTS,
+                    reference.business_name,
+                    exc,
+                )
+        raise ExtractionException(
+            f"Failed to open '{reference.business_name}' at {url}: {last_error}"
+        )
 
     def _wait_for_details(self, page: Page, reference: BusinessReference) -> None:
         """Wait for any configured business detail container to render."""

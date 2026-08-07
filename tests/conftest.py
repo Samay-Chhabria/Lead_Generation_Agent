@@ -93,6 +93,8 @@ def run_cli(
     with tempfile.TemporaryDirectory() as temp_dir:
         env = os.environ.copy()
         env["HEADLESS"] = "true"
+        env["PLAYWRIGHT_HEADLESS"] = "true"
+        env["ENABLE_LLM"] = "false"
         env["SEARCH_PROVIDER"] = "google"
         env["OUTPUT_DIR"] = os.path.join(temp_dir, "outputs")
         env["LOG_DIR"] = os.path.join(temp_dir, "logs")
@@ -104,5 +106,7 @@ def run_cli(
             input=input,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )

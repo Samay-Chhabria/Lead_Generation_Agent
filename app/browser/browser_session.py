@@ -102,7 +102,7 @@ class BrowserSession:
         self._logger.info("Browser closed.")
 
     def _create_context(self) -> BrowserContext:
-        context = self._result.browser.new_context()
+        context = self._result.browser.new_context(locale="en-US")
         self._logger.info("Context created.")
         return context
 

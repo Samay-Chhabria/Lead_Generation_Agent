@@ -1,5 +1,12 @@
-playwright>=1.40.0
-python-dotenv>=1.0.0
-openpyxl>=3.1.2
-rich>=13.7.0
-pytest>=8.0.0
+# Runtime dependencies (installed with: pip install -r requirements.txt)
+openpyxl>=3.1.2           # Excel (.xlsx) workbook generation
+playwright>=1.40.0        # Browser automation engine (launches Chromium)
+PySide6>=6.6              # Desktop GUI (app/gui/main.py — timeline, logs, results)
+python-dotenv>=1.0.0      # Loads configuration from a .env file
+rich>=13.7.0              # Console output: execution summary + colored logging
+# NOTE: The unified LLM gateway (Free LLM Router) uses only the Python standard
+# library (urllib) and talks to an OpenAI-compatible endpoint, so NO OpenAI or
+# per-vendor SDK is required.
+
+# Development/test dependencies (also installable via: pip install -e ".[dev]")
+pytest>=8.0.0             # Test runner

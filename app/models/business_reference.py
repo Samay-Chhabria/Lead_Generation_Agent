@@ -24,6 +24,10 @@ class BusinessReference:
         listing_index: The zero-based position of the listing on the results
             page at the moment it was discovered.
         provider: The name of the provider that discovered the listing.
+        rating: Best-effort Google rating (1.0-5.0) read from the card, if any.
+        review_count: Best-effort number of reviews read from the card, if any.
+        has_website: Whether the card hints the listing has a website.
+        verified: Whether the card hints the listing is verified/claimed.
     """
 
     business_id: str
@@ -31,6 +35,10 @@ class BusinessReference:
     listing_url: str | None = None
     listing_index: int = 0
     provider: str = ""
+    rating: float | None = None
+    review_count: int | None = None
+    has_website: bool = False
+    verified: bool = False
 
     @property
     def dedupe_key(self) -> str:

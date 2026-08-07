@@ -28,8 +28,8 @@ class LeadGenerationApplication:
         """Start the application and return the process exit code.
 
         Args:
-            prompt: Optional prompt to parse. When omitted, the agent reads the
-                prompt from the console.
+            prompt: Optional prompt for programmatic callers. When omitted (the
+                normal CLI path), the agent reads the prompt from the console.
         """
         try:
             if self._settings is None:

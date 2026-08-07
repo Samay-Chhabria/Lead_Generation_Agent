@@ -26,3 +26,4 @@ class ExecutionResult:
     excel_output_path: Path | None = None
     execution_time: float = 0.0
     success: bool = False
+    summary: str = ""

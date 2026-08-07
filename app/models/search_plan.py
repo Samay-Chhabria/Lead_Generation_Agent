@@ -15,7 +15,7 @@ class SearchPlan:
     business_type: str
     location: str | None = None
     provider: str = "google"
-    max_results: int = 10
+    max_results: int = 5
 
     def __post_init__(self) -> None:
         if not self.original_prompt.strip():

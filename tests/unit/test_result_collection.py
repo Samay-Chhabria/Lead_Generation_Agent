@@ -199,3 +199,64 @@ def test_logs_maximum_reached(caplog: pytest.LogCaptureFixture) -> None:
     assert len(references) == 5
     messages = [record.message for record in caplog.records]
     assert any("Maximum reached (5 businesses)." in message for message in messages)
+
+
+def test_logs_stopping_search_early_when_limit_reached(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    page = _feed_page(_cards(25))
+
+    with caplog.at_level(logging.INFO):
+        _collector(page, max_results=5).collect()
+
+    messages = [record.message for record in caplog.records]
+    assert any("Stopping search early." in message for message in messages)
+
+
+def test_reads_card_signals_from_text() -> None:
+    card = FakeElement(
+        {
+            "aria-label": "Acme Corp",
+            "href": "https://www.google.com/maps/place/Acme",
+        },
+        text="4.6 (210) reviews",
+    )
+    page = _feed_page([card])
+
+    references = _collector(page, max_results=10).collect()
+
+    assert references[0].business_name == "Acme Corp"
+    assert references[0].rating == 4.6
+    assert references[0].review_count == 210
+
+
+def test_reads_card_signals_from_data_attributes() -> None:
+    card = FakeElement(
+        {
+            "aria-label": "Acme Corp",
+            "href": "https://www.google.com/maps/place/Acme",
+            "data-rating": "4.7",
+            "data-reviews": "320",
+            "data-website": "1",
+            "data-verified": "1",
+        }
+    )
+    page = _feed_page([card])
+
+    references = _collector(page, max_results=10).collect()
+
+    assert references[0].rating == 4.7
+    assert references[0].review_count == 320
+    assert references[0].has_website is True
+    assert references[0].verified is True
+
+
+def test_missing_signals_are_neutral() -> None:
+    page = _feed_page(_cards(2))
+
+    references = _collector(page, max_results=10).collect()
+
+    assert references[0].rating is None
+    assert references[0].review_count is None
+    assert references[0].has_website is False
+    assert references[0].verified is False

@@ -95,10 +95,20 @@ def test_agent_prints_search_plan(
     )
 
     output = capsys.readouterr().out
-    assert "Search Plan" in output
-    assert "Original Prompt: software companies in Karachi" in output
-    assert "Business Type: software companies" in output
-    assert "Location: Karachi" in output
+    assert "🤖 Lead Generation Agent" in output
+    assert "User Request: software companies in Karachi" in output
+    assert "🧠 Understanding Request..." in output
+    assert "✓ Business Type: software companies" in output
+    assert "✓ Location: Karachi" in output
+    assert "🧠 Planning..." in output
+    assert "Goal: Find software companies in Karachi and export their leads." in output
+    assert "Execution Plan:" in output
+    assert "Estimated Leads:" in output
+    assert "Selected Provider:" in output
+    assert "🛠️ Execution Plan" in output
     assert "Provider:" in output
-    assert "Maximum Leads:" in output
-    assert "Search completed successfully." in output
+    assert "Maximum Results:" in output
+    assert "Website Crawling:" in output
+    assert "Export:" in output
+    assert "Lead Generation Completed Successfully" in output
+    assert "Status: SUCCESS" in output

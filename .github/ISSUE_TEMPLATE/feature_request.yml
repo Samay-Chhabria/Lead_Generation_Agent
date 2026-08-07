@@ -1,0 +1,48 @@
+name: Feature Request
+description: Propose a new feature or improvement
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an idea. Please check the
+        [existing issues](https://github.com/Samay-Chhabria/Lead_Generation_Agent/issues)
+        and the [Future Improvements section](https://github.com/Samay-Chhabria/Lead_Generation_Agent#future-improvements)
+        of the README before creating a duplicate.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem does this feature solve? Who benefits from it?
+      placeholder: Describe the pain point or missing capability.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you would like to see.
+      placeholder: Describe the feature and how it should work.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds or other approaches you considered.
+      placeholder: Optional.
+  - type: textarea
+    id: architecture
+    attributes:
+      label: Architecture impact (optional)
+      description: Which layer(s) would this touch? See the Developer Guide for the layer model.
+      placeholder: e.g. new provider in app/providers, new exporter in app/exporter.
+  - type: checkboxes
+    id: implementation
+    attributes:
+      label: Contribution
+      description: Are you willing to help implement this?
+      options:
+        - label: I can contribute a pull request for this feature
+        - label: I need guidance on how to implement it

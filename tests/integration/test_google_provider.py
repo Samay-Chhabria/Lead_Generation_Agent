@@ -29,7 +29,7 @@ from app.providers.provider_factory import ProviderFactory
 from app.providers.provider_registry import ProviderRegistry
 from app.providers.provider_result import ProviderResult
 from app.providers.result_collector import BUSINESS_CARD_SELECTORS
-from tests.fakes import FakeBrowser, FakePage, fake_card
+from tests.fakes import FakeBrowser, FakeElement, FakePage, fake_card
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ def test_search_opens_maps_and_submits_query(settings: Settings) -> None:
     assert links == []
     assert page.visited_url == GOOGLE_MAPS_URL
     assert ("#searchboxinput", "software companies in Karachi") in page.fills
-    assert ("#searchboxinput", "Enter") in page.presses
+    assert "Enter" in page.pressed_keys
 
 
 def test_collect_results_verifies_results_loaded(settings: Settings) -> None:
@@ -157,6 +157,124 @@ def test_close_releases_page(settings: Settings) -> None:
     assert browser.page.is_closed()
 
 
+def _signal_card(
+    name: str,
+    url: str,
+    rating: str,
+    reviews: str,
+    website: bool = False,
+    verified: bool = False,
+) -> FakeElement:
+    attributes = {
+        "aria-label": name,
+        "href": url,
+        "data-rating": rating,
+        "data-reviews": reviews,
+    }
+    if website:
+        attributes["data-website"] = "1"
+    if verified:
+        attributes["data-verified"] = "1"
+    return FakeElement(attributes)
+
+
+def test_selects_top_businesses_before_extraction(settings: Settings) -> None:
+    cards = [
+        _signal_card("B0", "https://www.google.com/maps/place/B0", "4.0", "10"),
+        _signal_card("B1", "https://www.google.com/maps/place/B1", "4.3", "20"),
+        _signal_card(
+            "B2", "https://www.google.com/maps/place/B2", "4.9", "300", website=True, verified=True
+        ),
+        _signal_card("B3", "https://www.google.com/maps/place/B3", "4.7", "150"),
+    ]
+    page = FakePage(cards=cards, card_selectors=set(BUSINESS_CARD_SELECTORS))
+    plan = SearchPlan(
+        original_prompt="software companies in Karachi",
+        business_type="software companies",
+        location="Karachi",
+        provider="google_maps",
+        max_results=2,
+    )
+    provider = _provider(settings, FakeBrowser(page), plan=plan)
+    provider.initialize()
+
+    provider.search()
+
+    assert [r.business_name for r in provider.references] == ["B2", "B3"]
+
+
+def test_selects_only_as_many_as_requested(settings: Settings) -> None:
+    page = FakePage(
+        cards=[
+            fake_card(f"Business {i}", f"https://www.google.com/maps/place/B{i}") for i in range(8)
+        ],
+        card_selectors=set(BUSINESS_CARD_SELECTORS),
+    )
+    plan = SearchPlan(
+        original_prompt="coffee shops in Karachi",
+        business_type="coffee shops",
+        location="Karachi",
+        provider="google_maps",
+        max_results=5,
+    )
+    provider = _provider(settings, FakeBrowser(page), plan=plan)
+    provider.initialize()
+
+    provider.search()
+
+    assert len(provider.references) == 5
+
+
+def test_logs_ranking_selection_and_extraction(
+    caplog: pytest.LogCaptureFixture, settings: Settings
+) -> None:
+    page = FakePage(
+        cards=[
+            fake_card(f"Business {i}", f"https://www.google.com/maps/place/B{i}") for i in range(6)
+        ],
+        card_selectors=set(BUSINESS_CARD_SELECTORS),
+    )
+    plan = SearchPlan(
+        original_prompt="coffee shops in Karachi",
+        business_type="coffee shops",
+        location="Karachi",
+        provider="google_maps",
+        max_results=5,
+    )
+    provider = _provider(settings, FakeBrowser(page), plan=plan)
+    provider.initialize()
+
+    with caplog.at_level(logging.INFO):
+        provider.search()
+
+    messages = [record.message for record in caplog.records]
+    assert any("Default result limit: 5." in message for message in messages)
+    assert any("Ranking businesses..." in message for message in messages)
+    assert any("Selected top 5 businesses." in message for message in messages)
+    assert any("Beginning extraction..." in message for message in messages)
+
+
+def test_logs_custom_result_limit_when_requested(
+    caplog: pytest.LogCaptureFixture, settings: Settings
+) -> None:
+    page = FakePage(card_selectors=set(BUSINESS_CARD_SELECTORS))
+    plan = SearchPlan(
+        original_prompt="find 3 coffee shops in Karachi",
+        business_type="find 3 coffee shops",
+        location="Karachi",
+        provider="google_maps",
+        max_results=3,
+    )
+    provider = _provider(settings, FakeBrowser(page), plan=plan)
+    provider.initialize()
+
+    with caplog.at_level(logging.INFO):
+        provider.search()
+
+    messages = [record.message for record in caplog.records]
+    assert any("Result limit: 3." in message for message in messages)
+
+
 def test_search_before_initialize_raises(settings: Settings) -> None:
     provider = _provider(settings, FakeBrowser())
 
@@ -180,6 +298,78 @@ def test_missing_results_raises(settings: Settings) -> None:
 
     with pytest.raises(ProviderSearchError):
         provider.search()
+
+
+def test_search_box_falls_back_to_name_q_when_canonical_inputs_missing(settings: Settings) -> None:
+    """Regression: the real input on lightweight Maps is input[name="q"]; when
+    #searchboxinput and the aria-label input are absent, the layered strategy
+    must still resolve and type into the surviving input."""
+    missing = {selector for selector in SEARCH_INPUT_SELECTORS if selector != 'input[name="q"]'}
+    page = FakePage(missing=missing)
+    provider = _provider(settings, FakeBrowser(page))
+    provider.initialize()
+
+    provider.search()
+
+    assert ('input[name="q"]', "software companies in Karachi") in page.fills
+    assert "Enter" in page.pressed_keys
+
+
+def test_search_box_skips_hidden_and_not_editable_candidates(settings: Settings) -> None:
+    """Regression: a matched-but-hidden or read-only search input must not be
+    selected; the provider keeps trying every strategy until an editable one is
+    found."""
+    page = FakePage(hidden={"#searchboxinput", 'input[aria-label="Search Google Maps"]'})
+    provider = _provider(settings, FakeBrowser(page))
+    provider.initialize()
+
+    provider.search()
+
+    assert any('input[role="combobox"]' in selector for selector, _ in page.fills)
+
+
+def test_fill_failure_triggers_typing_fallback(settings: Settings) -> None:
+    """Regression: a stale locator makes fill() raise. The provider must not
+    abort or retry the same fill; it re-resolves the box and types the query via
+    click -> Ctrl+A -> type(delay=40) -> Enter."""
+    page = FakePage(fill_errors={"#searchboxinput"})
+    provider = _provider(settings, FakeBrowser(page))
+    provider.initialize()
+
+    provider.search()
+
+    assert len(page.fills) == 1
+    assert ("#searchboxinput", "software companies in Karachi") in page.fills
+    assert "#searchboxinput" in page.clicks
+    assert ("#searchboxinput", "Control+A") in page.presses
+    assert ("#searchboxinput", "software companies in Karachi", 40) in page.typed
+    assert ("#searchboxinput", "Enter") in page.presses
+
+
+def test_ensure_fillable_logs_why_it_rejects(
+    caplog: pytest.LogCaptureFixture, settings: Settings
+) -> None:
+    page = FakePage(not_editable={"#searchboxinput"})
+    provider = _provider(settings, FakeBrowser(page))
+
+    with caplog.at_level(logging.WARNING):
+        assert provider._ensure_fillable(page, page.locator("#searchboxinput")) is False
+
+    messages = [record.message for record in caplog.records]
+    assert any("not editable" in message for message in messages)
+
+
+def test_ensure_fillable_rejects_hidden_when_logging_reason(
+    caplog: pytest.LogCaptureFixture, settings: Settings
+) -> None:
+    page = FakePage(hidden={"#searchboxinput"})
+    provider = _provider(settings, FakeBrowser(page))
+
+    with caplog.at_level(logging.WARNING):
+        assert provider._ensure_fillable(page, page.locator("#searchboxinput")) is False
+
+    messages = [record.message for record in caplog.records]
+    assert any("not visible" in message for message in messages)
 
 
 def test_navigation_failure_raises(settings: Settings) -> None:

@@ -94,10 +94,17 @@ class ProcessingPipeline:
         self._logger.info("Validation started.")
         valid: list[Lead] = []
         invalid_count = 0
+        invalid_reasons: list[dict[str, str]] = []
         for lead in normalized:
             verdict = self._validate_safely(lead)
             if verdict is None or not verdict.is_valid:
                 invalid_count += 1
+                invalid_reasons.append(
+                    {
+                        "business": (lead.business_name if lead is not None else "<None>"),
+                        "reason": verdict.reason if verdict is not None else "validation raised",
+                    }
+                )
                 continue
             valid.append(lead)
         self._logger.info("Validation complete. Total valid leads: %d.", len(valid))

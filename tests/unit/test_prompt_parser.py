@@ -86,6 +86,28 @@ def test_uses_provider_and_max_results_from_settings(settings: Settings) -> None
     assert plan.max_results == 25
 
 
+@pytest.mark.parametrize(
+    "prompt,expected",
+    [
+        ("find 3 coffee shops in America", 3),
+        ("collect 50 software companies in Pakistan", 50),
+        ("Top 10 restaurants in New York", 10),
+        ("at least 7 dentists near Lahore", 7),
+        ("5 coffee shops in Lahore", 5),
+    ],
+)
+def test_respects_explicit_numeric_requests(prompt: str, expected: int, settings: Settings) -> None:
+    plan = PromptParser().parse(prompt, settings=settings)
+
+    assert plan.max_results == expected
+
+
+def test_ignores_numbers_inside_locations(settings: Settings) -> None:
+    plan = PromptParser().parse("plumbers in DHA Phase 5 Karachi", settings=settings)
+
+    assert plan.max_results == 25
+
+
 def test_parses_without_explicit_settings() -> None:
     plan = PromptParser().parse("coffee shops in America")
 

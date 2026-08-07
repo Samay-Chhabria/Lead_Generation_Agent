@@ -53,7 +53,7 @@ class WebsiteNavigator:
         url = self.normalize_url(lead.website)
         if not url:
             raise ExtractionException(
-                f"Cannot open website for '{lead.business_name}': invalid URL " f"'{lead.website}'."
+                f"Cannot open website for '{lead.business_name}': invalid URL '{lead.website}'."
             )
         return self.open_url(url, page)
 
