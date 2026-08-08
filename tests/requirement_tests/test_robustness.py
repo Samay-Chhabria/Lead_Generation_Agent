@@ -9,6 +9,8 @@ without duplicating them.
 
 import logging
 
+import pytest
+
 from app.application.application import LeadGenerationApplication
 from app.config.constants import LOG_FILE_NAME
 from app.models.lead import Lead
@@ -71,7 +73,7 @@ def _lead(name: str = "Alpha Corp") -> Lead:
 
 
 def test_application_contains_config_failure_and_returns_nonzero(
-    tmp_path, caplog: logging.LogCaptureFixture
+    tmp_path, caplog: pytest.LogCaptureFixture
 ) -> None:
     settings = make_settings(tmp_path, log_level="NOT_A_LEVEL")
 
